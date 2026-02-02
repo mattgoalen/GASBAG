@@ -64,7 +64,7 @@ module control_mod
      type(string) :: name(MAX_ALGORITHMS)
      !> How many do we want to actually use?
      integer :: N_algorithms
-     !> How mamy basis functions do we read in (and maybe use) for Guanter-type?
+     !> How many basis functions do we read in (and maybe use) for Guanter-type?
      integer :: N_basisfunctions
      !> Do we use the Guanter-type retrival?
      logical :: using_GK_SIF
@@ -497,7 +497,7 @@ contains
              call logger%trivia(fname, "Utilizing Guanter-type SIF retrieval!")
           else if(CS%algorithm%name(i) == 'physical') then
              CS%algorithm%using_physical = .true.
-             call logger%trivia(fname, "Utilizing phyiscal retrieval!")
+             call logger%trivia(fname, "Utilizing physical retrieval!")
           end if
        end do
     end if

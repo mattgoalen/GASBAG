@@ -506,7 +506,7 @@ contains
                       call split_sv_string(3)%split(tokens=split_svval_string, sep=':')
 
                       if (size(split_svval_string) /= 3) then
-                         call logger%fatal(fname, "Error in gas-scale string. Must have exactly 2 vertical bars.")
+                         call logger%fatal(fname, "Error in gas-scale string. Must have exactly 2 colons (:).")
                          stop 1
                       end if
 
