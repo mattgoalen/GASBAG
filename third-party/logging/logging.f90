@@ -245,33 +245,108 @@ contains
     end if
   end function get_designator
 
-  function current_time()
-    !* Author: Chris MacMackin
-    !  Date: November 2016
-    !
-    ! Returns the formatted current date and time.
-    !
-    character(len=20) :: current_time
-    integer(i8), dimension(8) :: time_vals
-    character(len=3), dimension(12), parameter :: months = ['Jan', &
-         'Feb', &
-         'Mar', &
-         'Apr', &
-         'May', &
-         'Jun', &
-         'Jul', &
-         'Aug', &
-         'Sep', &
-         'Oct', &
-         'Nov', &
-         'Dec']
-    character(len=42), parameter :: time_format = '(a3,1x,i2,1x,i4,1x,'// &
-         'i2.2,":",i2.2,":",i2.2)'
+  ! Edits Mattea Goalen: threads were getting locked, attempt 
+  ! to ensure only one thread logs at a time
+  ! Returns formatted date/time: 'Mon dd yyyy hh:mm:ss'
+  function current_time() result(s)
+    implicit none
+    character(len=20) :: s
+    integer :: time_vals(8)  ! [year, month, day, zone, hour, minute, second, millisecond]
+    character(len=3), parameter :: months(12) = [ &
+         'Jan','Feb','Mar','Apr','May','Jun', &
+         'Jul','Aug','Sep','Oct','Nov','Dec' ]
+
     call date_and_time(values=time_vals)
-    write(current_time,time_format) months(time_vals(2)), time_vals(3), &
-         time_vals(1), time_vals(5), time_vals(6), &
-         time_vals(7)
+
+    ! Assemble without any internal WRITE (avoids libgfortran I/O lock)
+    s(1:3)   = months(time_vals(2))             ! Mon
+    s(4:4)   = ' '                              ! space
+    s(5:6)   = day2(time_vals(3))               ! dd (space-padded for 1..9)
+    s(7:7)   = ' '                              ! space
+    s(8:11)  = digits4(time_vals(1))            ! yyyy
+    s(12:12) = ' '                              ! space
+    s(13:14) = digits2(time_vals(5))            ! hh (zero-padded)
+    s(15:15) = ':'                              ! colon
+    s(16:17) = digits2(time_vals(6))            ! mm
+    s(18:18) = ':'                              ! colon
+    s(19:20) = digits2(time_vals(7))            ! ss
   end function current_time
+
+  ! Format 0..99 as two digits with leading zero.
+  pure function digits2(n) result(cs)
+    implicit none
+    integer, intent(in) :: n
+    character(len=2) :: cs
+    integer :: tens, ones
+
+    tens = n / 10
+    ones = mod(n, 10)
+    cs(1:1) = achar(iachar('0') + tens)
+    cs(2:2) = achar(iachar('0') + ones)
+  end function digits2
+
+  ! Format day 1..31 as two characters: leading SPACE for 1..9 (matches your format).
+  pure function day2(d) result(cs)
+    implicit none
+    integer, intent(in) :: d
+    character(len=2) :: cs
+    if (d < 10) then
+      cs(1:1) = ' '
+      cs(2:2) = achar(iachar('0') + d)
+    else
+      cs = digits2(d)
+    end if
+  end function day2
+
+  ! Format year as four digits (assumes 0000..9999).
+  pure function digits4(y) result(cs)
+    implicit none
+    integer, intent(in) :: y
+    character(len=4) :: cs
+    integer :: t, h, te, o
+
+    t  = y / 1000
+    h  = mod(y, 1000) / 100
+    te = mod(y, 100)  / 10
+    o  = mod(y, 10)
+
+    cs(1:1) = achar(iachar('0') + t)
+    cs(2:2) = achar(iachar('0') + h)
+    cs(3:3) = achar(iachar('0') + te)
+    cs(4:4) = achar(iachar('0') + o)
+  end function digits4
+
+!!
+
+!  function current_time()
+!    !* Author: Chris MacMackin
+!    !  Date: November 2016
+!    !
+!    ! Returns the formatted current date and time.
+!    !
+!    character(len=20) :: current_time
+!    integer(i8), dimension(8) :: time_vals
+!    character(len=3), dimension(12), parameter :: months = ['Jan', &
+!         'Feb', &
+!         'Mar', &
+!         'Apr', &
+!         'May', &
+!         'Jun', &
+!         'Jul', &
+!         'Aug', &
+!         'Sep', &
+!         'Oct', &
+!         'Nov', &
+!         'Dec']
+!    character(len=42), parameter :: time_format = '(a3,1x,i2,1x,i4,1x,'// &
+!         'i2.2,":",i2.2,":",i2.2)'
+!    call date_and_time(values=time_vals)
+!    ! !$OMP CRITICAL
+!    ! write(current_time,time_format) months(time_vals(2)), time_vals(3), &
+!    !      time_vals(1), time_vals(5), time_vals(6), &
+!    !      time_vals(7)
+!    ! !$OMP END CRITICAL
+!  end function current_time
 
   subroutine logger_message(this,source,priority,message)
     !* Author: Chris MacMackin
@@ -314,9 +389,34 @@ contains
     end if
     if (priority >= this%logfile_threshold) then
        output = get_designator(priority,.false.)//message
+       
+	! Ensure the file unit is valid and open before writing
+  	block
+    	  integer :: u
+    	  logical :: is_open
+
+  	  u = this%fileunit
+  	  inquire(unit=u, opened=is_open)         ! checks if the unit is currently open
+
+  	  if (.not. is_open .or. u <= 0) then
+    	    ! Either initialize the log file unit here, or fallback to stdout
+    	    ! Option 1: Fallback to stdout to avoid runtime errors
+      	    u = output_unit
+
+	    ! Option 2 (preferred): Open the log file if you have this%logfile set:
+  	    ! if (len_trim(this%logfile) > 0) then
+  	    !   open(newunit=u, file=trim(this%logfile), action='write', &
+  	    !        position='append', status='unknown', form='formatted')
+  	    !   this%fileunit = u
+  	    ! else
+  	    !   u = output_unit
+  	    ! end if
+    	  end if
+       
        !$OMP CRITICAL
-       write(this%fileunit,default_format) current_time(), source, this_thread, output
+       write(u,default_format) current_time(), source, this_thread, output
        !$OMP END CRITICAL
+      end block
     end if
   end subroutine logger_message
 
